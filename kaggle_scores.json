@@ -1,0 +1,73 @@
+{
+    "data entry": {
+        "name": "Generic Data Entry Role",
+        "score": 85,
+    "effortCount: 420,"responseCount": 2,
+        "recommendation": "Avoid / Energy Sink (High Fraudulence Risk)",
+        "dataSource": "Kaggle Dataset Analysis"
+    },
+    "cruise staff": {
+        "name": "Cruise Staff Posting",
+        "score": 92,
+        "effortCount": 650,
+        "responseCount": 0,
+        "recommendation": "Avoid / Energy Sink (Frequent Kaggle Scam Pattern)",
+        "dataSource": "Kaggle Dataset Analysis"
+    },
+    "bj's wholesale": {
+        "name": "BJ's Wholesale Club",
+        "score": 65,
+        "effortCount": 310,
+        "responseCount": 12,
+        "recommendation": "Apply Cautiously (Reported Recursive Posting Pattern)",
+        "dataSource": "Industry Reports (Google Search)"
+    },
+    "target": {
+        "name": "Target Retail",
+        "score": 55,
+        "effortCount": 240,
+        "responseCount": 28,
+        "recommendation": "Apply Cautiously (Observed High Volume / Low Response Ratio)",
+        "dataSource": "Industry Analysis (Google Research)"
+    },
+    "accenture": {
+        "name": "Accenture Strategy",
+        "score": 45,
+        "effortCount": 180,
+        "responseCount": 45,
+        "recommendation": "Apply with Confidence (Standard Corporate Response)",
+        "dataSource": "Industry Benchmark"
+    },
+    "meta": {
+        "name": "Meta (Facebook)",
+        "score": 75,
+        "effortCount": 890,
+        "responseCount": 5,
+        "recommendation": "Avoid / Energy Sink (Low Response relative to Post-Layoff Volume)",
+        "dataSource": "Public Sentiment & News Reports"
+    },
+    "big lots": {
+        "name": "Big Lots Corporate",
+        "score": 82,
+        "effortCount": 450,
+        "responseCount": 1,
+        "recommendation": "Avoid / Energy Sink (Likely Ghost Job post-bankruptcy)",
+        "dataSource": "News Monitoring (Google)"
+    },
+    "hubspot": {
+        "name": "HubSpot",
+        "score": 60,
+        "effortCount": 520,
+        "responseCount": 15,
+        "recommendation": "Apply Cautiously (High Applicant Volume Pattern)",
+        "dataSource": "Crowdsourced Signal Data"
+    },
+    "infosys": {
+        "name": "Infosys (Fraud Alert)",
+        "score": 95,
+        "effortCount": 1200,
+        "responseCount": 0,
+        "recommendation": "Avoid / Severe Energy Sink (Scammer Impersonation Pattern)",
+        "dataSource": "Company Official Fraud Alert"
+    }
+}
