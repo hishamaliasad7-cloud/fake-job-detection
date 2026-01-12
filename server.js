@@ -19,6 +19,16 @@ try {
 
 const jobSignals = {};
 
+// 0. Root Route (For Vercel Health Check)
+app.get('/', (req, res) => {
+    res.json({
+        name: "AESD AI API",
+        version: "2.1",
+        status: "Production Ready",
+        endpoints: ["/api/scores", "/api/ats-scan", "/api/signals"]
+    });
+});
+
 /**
  * v2.0 Scoring Engine - Supports Company and Position
  */
@@ -147,6 +157,10 @@ app.post('/api/ats-scan', (req, res) => {
     });
 });
 
-app.listen(PORT, () => {
-    console.log(`AESD v2.1 Backend (AI Enabled) running on http://localhost:${PORT}`);
-});
+if (process.env.NODE_ENV !== 'test') {
+    app.listen(PORT, () => {
+        console.log(`AESD v2.1 Backend (AI Enabled) running on http://localhost:${PORT}`);
+    });
+}
+
+module.exports = app;
