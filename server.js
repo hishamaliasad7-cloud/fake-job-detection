@@ -1,166 +1,184 @@
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
+const { Pool } = require('pg');
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
+const axios = require('axios');
+require('dotenv').config();
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
+const SLSA_JWT_SECRET = process.env.JWT_SECRET || 'aesd-super-secret-key';
+const ML_API_URL = process.env.ML_API_URL || 'http://localhost:5000';
 
+// Middleware
 app.use(cors());
 app.use(bodyParser.json());
 
-// Load pre-calculated Kaggle scores
-let kaggleScores = {};
-try {
-    kaggleScores = require('./kaggle_scores.json');
-    console.log("Kaggle reputation data loaded successfully.");
-} catch (e) {
-    console.log("Kaggle scores not found.");
-}
-
-const jobSignals = {};
-
-// 0. Root Route (For Vercel Health Check)
-app.get('/', (req, res) => {
-    res.json({
-        name: "AESD AI API",
-        version: "2.1",
-        status: "Production Ready",
-        endpoints: ["/api/scores", "/api/ats-scan", "/api/signals"]
-    });
+// Database Pool
+const pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 });
 
-/**
- * v2.0 Scoring Engine - Supports Company and Position
- */
-function calculateScoreV2(company, position) {
-    const compKey = (company || "").toLowerCase().trim();
-    const posKey = (position || "").toLowerCase().trim();
-
-    // 1. Check for historic data (Prioritizing specific matches)
-    let match = kaggleScores[compKey] || kaggleScores[posKey];
-
-    // 2. Generate detailed traits based on the match
-    let traits = [];
-    if (posKey.includes('data entry') || posKey.includes('cruise')) {
-        traits.push({ label: 'High Fraud Probability (Kaggle Trend)', type: 'risk' });
-        traits.push({ label: 'Effort Sink Pattern', type: 'risk' });
+// --- AUTH MIDDLEWARE ---
+const authenticate = (req, res, next) => {
+    const token = req.headers['authorization']?.split(' ')[1];
+    if (!token) return res.status(401).json({ error: 'Access denied' });
+    try {
+        const verified = jwt.verify(token, SLSA_JWT_SECRET);
+        req.user = verified;
+        next();
+    } catch (err) {
+        res.status(400).json({ error: 'Invalid token' });
     }
-    if (compKey === 'meta' || compKey === 'google') {
-        traits.push({ label: 'High Competition Signal', type: 'info' });
-        traits.push({ label: 'Delayed Response Verified', type: 'risk' });
+};
+
+const adminOnly = (req, res, next) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+    next();
+};
+
+// --- AUTH ROUTES ---
+app.post('/api/auth/signup', async (req, res) => {
+    const { name, email, password, role, company_name } = req.body;
+    try {
+        const hashedPassword = await bcrypt.hash(password, 10);
+        const result = await pool.query(
+            'INSERT INTO users (name, email, password_hash, role, company_name) VALUES ($1, $2, $3, $4, $5) RETURNING id, name, role',
+            [name, email, hashedPassword, role || 'seeker', company_name]
+        );
+        res.status(201).json(result.rows[0]);
+    } catch (err) {
+        res.status(400).json({ error: 'Email already exists' });
     }
-
-    if (match) {
-        return {
-            ...match,
-            traits: traits.length > 0 ? traits : [{ label: 'Historic Pattern Match', type: 'info' }],
-            isHistoric: true
-        };
-    }
-
-    // 3. Fallback to real-time signals if no historic data
-    const sigKey = compKey + "|" + posKey;
-    const signals = jobSignals[sigKey] || [];
-
-    if (signals.length === 0) {
-        return {
-            score: 0, effortCount: 0, responseCount: 0,
-            recommendation: "Insufficient Data (New Job Cluster)",
-            traits: [{ label: 'Fresh Listing', type: 'info' }],
-            method: "Real-time AESD Tracker"
-        };
-    }
-
-    // ... (Signal logic same as before, but using sigKey)
-    let totalEffort = 0; let responses = 0;
-    signals.forEach(sig => {
-        if (sig.type === 'click') totalEffort += 1;
-        if (sig.type === 'file_upload') totalEffort += 20;
-        if (sig.type === 'application_submitted') totalEffort += 50;
-        if (sig.type === 'observed_response') responses += 1;
-    });
-
-    const rawScore = totalEffort / (Math.pow(responses + 1, 1.5));
-    const score = Math.round(Math.min(100, rawScore * 2));
-
-    return {
-        score, effortCount: totalEffort, responseCount: responses,
-        recommendation: getRecommendation(score),
-        traits: score > 60 ? [{ label: 'Inefficient Feedback Loop', type: 'risk' }] : [{ label: 'Healthy Response Signal', type: 'success' }],
-        method: "Real-time AESD Tracker"
-    };
-}
-
-app.get('/api/scores', (req, res) => {
-    const { company, position } = req.query;
-    const analysis = calculateScoreV2(company, position);
-    res.json(analysis);
 });
 
-app.post('/api/signals', (req, res) => {
-    const { company, position, type, timestamp } = req.body;
-    const sigKey = (company || "").toLowerCase() + "|" + (position || "").toLowerCase();
+app.post('/api/auth/login', async (req, res) => {
+    const { email, password } = req.body;
+    try {
+        const user = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+        if (user.rows.length === 0) return res.status(400).json({ error: 'User not found' });
 
-    if (!jobSignals[sigKey]) jobSignals[sigKey] = [];
-    jobSignals[sigKey].push({ type, timestamp });
-    res.status(201).json({ status: 'recorded' });
+        const validPass = await bcrypt.compare(password, user.rows[0].password_hash);
+        if (!validPass) return res.status(400).json({ error: 'Invalid password' });
+
+        const token = jwt.sign({ id: user.rows[0].id, role: user.rows[0].role }, SLSA_JWT_SECRET);
+        res.json({ token, user: { id: user.rows[0].id, name: user.rows[0].name, role: user.rows[0].role } });
+    } catch (err) {
+        res.status(500).json({ error: 'Server error' });
+    }
 });
 
-/**
- * AI ATS Matching Engine (v2.1)
- */
-const SKILL_MAP = {
-    "javascript": ["frontend engineer", "fullstack developer", "meta", "google"],
-    "node.js": ["backend engineer", "system architect", "amazon"],
-    "react": ["frontend engineer", "ui developer", "meta"],
-    "python": ["data scientist", "machine learning engineer", "google", "accenture"],
-    "java": ["backend developer", "infosys", "accenture"],
-    "sales": ["sales executive", "target", "bj's wholesale"],
-}
-
-app.post('/api/ats-scan', (req, res) => {
-    // In a real app, we'd use PDF-parse or Tesseract here.
-    // For this demo, we simulate extraction from the uploaded file metadata
-    const { resumeName, simulatedSkills } = req.body;
-
-    if (!simulatedSkills || simulatedSkills.length === 0) {
-        return res.status(400).json({ error: "No skills detected in resume." });
+// --- JOB ROUTES ---
+app.get('/api/jobs', async (req, res) => {
+    try {
+        const result = await pool.query('SELECT j.*, u.name as recruiter_name FROM jobs j LEFT JOIN users u ON j.recruiter_id = u.id WHERE j.status = \'approved\' ORDER BY created_at DESC');
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to fetch jobs' });
     }
+});
 
-    let recommendations = [];
-    let score = 0;
+app.post('/api/jobs', authenticate, async (req, res) => {
+    if (req.user.role !== 'recruiter' && req.user.role !== 'admin') return res.status(403).json({ error: 'Only recruiters can post' });
+    const { title, company_name, location, description, salary_range } = req.body;
+    
+    try {
+        // Run ML Check on description
+        let riskScore = 0;
+        try {
+            const mlResp = await axios.post(`${ML_API_URL}/predict`, { text: description });
+            if (mlResp.data.prediction === 'Fake') riskScore = 80;
+        } catch (e) { console.error("ML API Unreachable"); }
 
-    simulatedSkills.forEach(skill => {
-        const matches = SKILL_MAP[skill.toLowerCase()];
-        if (matches) {
-            score += 15;
-            matches.forEach(match => {
-                if (kaggleScores[match]) {
-                    recommendations.push({
-                        company: kaggleScores[match].name || match,
-                        position: match.includes('engineer') ? match : "Specialist",
-                        reputationScore: kaggleScores[match].score,
-                        matchStrength: "High"
-                    });
-                }
-            });
+        const result = await pool.query(
+            'INSERT INTO jobs (recruiter_id, title, company_name, location, description, salary_range, status) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
+            [req.user.id, title, company_name, location, description, salary_range, riskScore > 70 ? 'pending' : 'approved']
+        );
+        res.status(201).json(result.rows[0]);
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to post job' });
+    }
+});
+
+// --- SCORING & SIGNALS ---
+app.get('/api/scores', async (req, res) => {
+    const { company, jobId } = req.query;
+    try {
+        const effortRes = await pool.query(
+            'SELECT SUM(ae.value) as effort, COUNT(*) as app_count FROM applicant_efforts ae JOIN jobs j ON ae.job_id = j.id WHERE j.job_hash = $1 OR j.company_name = $2', 
+            [jobId, company]
+        );
+        const responseRes = await pool.query(
+            'SELECT COUNT(*) as responses FROM employer_responses er JOIN jobs j ON er.job_id = j.id WHERE j.job_hash = $1 OR j.company_name = $2', 
+            [jobId, company]
+        );
+        
+        const effort = parseInt(effortRes.rows[0].effort) || 0;
+        const totalApps = parseInt(effortRes.rows[0].app_count) || 1;
+        const responses = parseInt(responseRes.rows[0].responses) || 0;
+        
+        // Energy Sink Score = Total Effort / (Meaningful Responses + 1)
+        const rawScore = (effort / (responses + 1));
+        const normalizedScore = Math.min(100, Math.round((rawScore / 500) * 100));
+
+        res.json({
+            score: normalizedScore,
+            name: company || "Job Profile",
+            effortCount: effort,
+            responseCount: responses,
+            responseRate: Math.round((responses / totalApps) * 100),
+            recommendation: normalizedScore > 60 ? "High Energy Sink - Proceed with Caution" : "Efficient Hiring Process",
+            traits: normalizedScore > 60 ? 
+                [{ label: 'High Effort Sink', type: 'risk' }, { label: 'Low Response Yield', type: 'risk' }] :
+                [{ label: 'High Transparency', type: 'success' }, { label: 'Active Recruitment', type: 'success' }]
+        });
+    } catch (err) {
+        res.status(500).json({ error: 'Scoring failed' });
+    }
+});
+
+
+app.post('/api/signals', async (req, res) => {
+    const { jobId, type, value, metadata } = req.body;
+    try {
+        // Record signal if job exists by hash
+        const job = await pool.query('SELECT id FROM jobs WHERE job_hash = $1', [jobId]);
+        if (job.rows.length > 0) {
+            await pool.query('INSERT INTO applicant_efforts (job_id, effort_type, value, metadata) VALUES ($1, $2, $3, $4)', [job.rows[0].id, type, value || 1, metadata]);
         }
-    });
-
-    const finalScore = Math.min(98, Math.max(40, score + Math.floor(Math.random() * 20)));
-
-    res.json({
-        resumeName,
-        atsScore: finalScore,
-        recommendations: [...new Set(recommendations.map(JSON.stringify))].map(JSON.parse).slice(0, 3),
-        analysis: `We found ${simulatedSkills.length} core competencies. Based on historic Kaggle data and company behavioral signals, these roles offer the best match for your profile.`
-    });
+        res.json({ status: 'recorded' });
+    } catch (err) {
+        res.status(500).json({ error: 'Signal error' });
+    }
 });
 
-if (process.env.NODE_ENV !== 'test') {
-    app.listen(PORT, () => {
-        console.log(`AESD v2.1 Backend (AI Enabled) running on http://localhost:${PORT}`);
-    });
-}
+// --- ADMIN ROUTES ---
+app.get('/api/admin/pending', authenticate, adminOnly, async (req, res) => {
+    const result = await pool.query('SELECT * FROM jobs WHERE status = \'pending\'');
+    res.json(result.rows);
+});
 
-module.exports = app;
+app.post('/api/admin/approve', authenticate, adminOnly, async (req, res) => {
+    const { jobId, status } = req.body; // status: 'approved' or 'rejected'
+    await pool.query('UPDATE jobs SET status = $1 WHERE id = $2', [status, jobId]);
+    res.json({ status: 'updated' });
+});
+
+app.get('/api/admin/reports', authenticate, adminOnly, async (req, res) => {
+    const result = await pool.query('SELECT r.*, j.title, u.name as reporter FROM reports r JOIN jobs j ON r.job_id = j.id JOIN users u ON r.reporter_id = u.id');
+    res.json(result.rows);
+});
+
+// --- REPORTING ---
+app.post('/api/reports', authenticate, async (req, res) => {
+    const { jobId, reason } = req.body;
+    await pool.query('INSERT INTO reports (job_id, reporter_id, reason) VALUES ($1, $2, $3)', [jobId, req.user.id, reason]);
+    res.json({ status: 'reported' });
+});
+
+app.listen(PORT, () => {
+    console.log(`AESD Full Portal Backend running on port ${PORT}`);
+});
