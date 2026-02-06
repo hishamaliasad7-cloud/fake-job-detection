@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "JobZoid",
+  "version": "1.0",
+  "description": "Applicant Energy Sink Detector - HireGuard Security Extension",
+  "permissions": ["tabs", "storage", "scripting"],
+  "host_permissions": ["*://*/*"],
+  "background": {
+    "service_worker": "src/background.js"
+  },
+  "content_scripts": [{
+    "matches": ["*://*/*"],
+    "js": ["src/content.js"]
+  }],
+  "icons": {
+    "128": "icons/icon128.png"
+  }
+}

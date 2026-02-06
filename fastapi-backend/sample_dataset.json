@@ -1,0 +1,36 @@
+[
+  {
+    "job_id": "J101",
+    "title": "Data Scientist",
+    "description": "Always looking for great talent to join our future pipeline...",
+    "company": "ShadowCorp",
+    "historical_avg_sink": 78.5,
+    "posted_days_ago": 65,
+    "effort_metrics": {
+      "time_spent": 45,
+      "fields_filled": 20,
+      "ats_redirects": 3,
+      "uploads": 2
+    },
+    "employer_response": "None",
+    "label": 1,
+    "label_name": "Ghost Job"
+  },
+  {
+    "job_id": "J102",
+    "title": "React Developer",
+    "description": "Urgent hiring for a specific project starting next month...",
+    "company": "BuildFast",
+    "historical_avg_sink": 12.0,
+    "posted_days_ago": 2,
+    "effort_metrics": {
+      "time_spent": 10,
+      "fields_filled": 5,
+      "ats_redirects": 0,
+      "uploads": 1
+    },
+    "employer_response": "Interview",
+    "label": 0,
+    "label_name": "Real Job"
+  }
+]
